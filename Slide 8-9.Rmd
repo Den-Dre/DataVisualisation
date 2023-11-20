@@ -1,0 +1,187 @@
+---
+title: "Seasonal changes in popular songs' attributes"
+author: "Hanna Bulyaki"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    highlight: zenburn
+    number_sections: true
+    toc: yes
+    toc_float: yes
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE, 
+  warning = FALSE, 
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+options(digits = 3)
+
+# default figure size
+knitr::opts_chunk$set(
+  fig.width=6.75, 
+  fig.height=6.75,
+  fig.align = "center"
+)
+```
+
+
+```{r libraries, include=FALSE}
+library(tidyverse)
+library(vroom)
+library(ggtext)
+library(gapminder)
+library(ggrepel)
+library(patchwork)
+library(gghighlight)
+library(skimr)
+library(showtext)
+library(remotes)
+library(ggplot2)
+library(sf)
+library(dplyr)
+library(janitor)
+library(rnaturalearth)
+library(plotly)
+library(patchwork)
+library(cowplot)
+```
+
+# Exploring songs attributes by season
+
+## Import, clean and explore data
+
+```{r, load data, message = FALSE}
+charts <- vroom("charts.csv")
+#glimpse(spotify)
+
+songs <- vroom("spotify_top_music.csv")
+#glimpse(songs)
+
+spotify <- charts %>%
+  inner_join(songs, by = "title") %>%
+  janitor::clean_names()
+#glimpse(spotify)
+
+explore <- spotify %>%
+  distinct(region) %>%
+  arrange(region)
+
+#explore
+```
+
+## Plot average song attributes by season
+
+```{r, plot1}
+spotify$date <- as.Date(spotify$date, format = "%Y-%m-%d")
+
+seasons <- spotify %>%
+  
+  # filter for European countries
+  filter(region == c("Austria", "Belgium", "Bulgaria", "Czech Republic", "Denmark", "Estonia", "Finland", "France", 
+                     "Germany", "Greece", "Hungary", "Iceland", "Italy", "Latvia", "Lithuania", "Luxembourg", 
+                     "Netherlands", "Norway", "Poland", "Portugal", "Romania", "Russia", "Slovakia", "Spain", 
+                     "Sweden", "Switzerland", "Ukraine", "United Kingdom")) %>%
+  
+  # create seasons
+  mutate(season = case_when(
+    month(date) %in% c(1, 2, 12) ~ "Winter",
+    month(date) %in% c(3, 4, 5) ~ "Spring",
+    month(date) %in% c(6, 7, 8) ~ "Summer",
+    month(date) %in% c(9, 10, 11) ~ "Autumn"
+  )) %>%
+  group_by(season) %>%
+  
+  #calculate averages
+  summarise(
+    Valence = mean(val),
+    Energy = mean(nrgy),
+    Danceability = mean(dnce),
+    Liveness = mean(live),
+    Acousticness = mean(acous),
+    Speechiness = mean(spch)
+  )
+
+glimpse(seasons)
+
+seasons_long <- tidyr::gather(seasons, key = "variable", value = "value", -season)
+
+season_order <- c("Spring", "Summer", "Autumn", "Winter")
+  
+# plot the data
+ggplot(seasons_long, aes(x = factor(season, levels = season_order), y = value)) +
+  geom_bar(colour = "black", fill = "#c4f3d2ff", stat = "identity", position = position_dodge(width = 0.8)) +
+  facet_wrap(~variable, scales = "free_y", ncol = 3) +
+  labs(title = str_wrap("Average acousticness and valence of popular songs change the most throughout seasons.", width = 70),
+       subtitle = str_wrap("Happier songs are more popular in the summer, while acousticness becomes more important during winter months.", width = 80),
+       x = "Season",
+       y = "Average Value") +
+  #scale_fill_manual(values = c("Summer" = "#c4f3d2ff", "Winter" = "#c4f3d2ff", "Spring" = "#c4f3d2ff", "Autumn" = "#c4f3d2ff"))+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+
+```
+
+## Plot song attributes seasonally by country
+
+```{r, prepare data for plot2}
+
+# create a base-map for Europe
+world <- ne_countries(scale = "medium", returnclass = "sf")
+europe <- world[which(world$continent == "Europe"),]
+
+# sort months into seasons
+spotify_map <- spotify %>%
+  mutate(season = case_when(
+    month(date) %in% c(3, 4, 5) ~ "Spring",
+    month(date) %in% c(9, 10, 11) ~ "Autumn",
+    month(date) %in% c(1, 2, 12) ~ "Winter",
+    month(date) %in% c( 6, 7, 8) ~ "Summer"
+  )) %>%
+  group_by(region, season)
+  
+```
+
+```{r, plot maps}
+# create a function that plots the average song attributes by country
+plot_map <- function(data, value_var, plot_title, palette) {
+  agg_data <- data %>%
+    summarize(avg = mean({{value_var}}, na.rm = TRUE))
+
+  # filter outlier data, select summer and winter
+  map_data <- left_join(europe, agg_data, by = c("admin" = "region")) %>%
+    filter(admin != "Russia", season != "NA", admin != "Ukraine") %>%
+    filter(season == c("Summer", "Winter"))
+
+  ggplot(map_data) +
+    geom_sf(aes(fill = avg), color = "white", size = 0.2) +
+    coord_sf(xlim = c(-25,50), ylim = c(35,70), expand = FALSE) +
+    facet_wrap(~season) +
+    scale_fill_gradientn(colors = palette, na.value = "white") +
+    labs(title = plot_title) +
+    theme_minimal() +
+    theme(legend.position = "bottom", axis.text = element_blank(), panel.grid = element_blank())
+}
+
+# define colour palettes
+palette1 <- c("#db3236", "#f4c20d", "#3cba54")
+palette2 <- c("#3cba54", "#f4c20d", "#db3236")
+
+# plot the attributes
+plot1 <- plot_map(spotify_map, val, "Average Valence", palette1)
+plot2 <- plot_map(spotify_map, dnce, "Average Danceability", palette1)
+plot3 <- plot_map(spotify_map, acous, "Average Acousticness", palette2)
+plot4 <- plot_map(spotify_map, nrgy, "Average Energy", palette1)
+plot5 <- plot_map(spotify_map, live, "Average Liveness", palette2)
+plot6 <- plot_map(spotify_map, spch, "Average Speechiness", palette1)
+
+grid_plot <- plot_grid(plot1, plot2, plot4, plot3, ncol = 2)
+
+# Print the combined plot
+print(grid_plot)
+
+```
+
+
