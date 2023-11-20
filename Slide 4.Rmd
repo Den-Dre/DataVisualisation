@@ -1,0 +1,153 @@
+---
+title: "Spotify"
+output: html_document
+date: "2023-11-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(ggplot2)
+library(gganimate)
+library(tidyr)
+```
+
+```{r}
+music_data <- read.csv("/Users/ericwong/Desktop/LBS/Data Visualisation and Story Telling /am10.mam2023-main/data_by_year.csv")
+head(music_data)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# grouping the data by 'year' and calculating the mean of each audio feature
+yearly_avg <- music_data %>%
+  group_by(year) %>%
+  summarise(acousticness = mean(acousticness),
+            danceability = mean(danceability),
+            energy = mean(energy),
+            instrumentalness = mean(instrumentalness),
+            liveness = mean(liveness),
+            speechiness = mean(speechiness),
+            valence = mean(valence))
+
+# visualize the changes in these features over time using line plots
+ggplot(yearly_avg, aes(x = year)) +
+  geom_line(aes(y = acousticness, color = "Acousticness"), size = 1) +
+  geom_line(aes(y = danceability, color = "Danceability"), size = 1) +
+  geom_line(aes(y = energy, color = "Energy"), size = 1) +
+  geom_line(aes(y = instrumentalness, color = "Instrumentalness"), size = 1) +
+  geom_line(aes(y = liveness, color = "Liveness"), size = 1) +
+  geom_line(aes(y = speechiness, color = "Speechiness"), size = 1) +
+  labs(title = "Song Attribute Preferences Over Time",
+       x = "Year",
+       y = "Value") +
+  scale_color_manual(values = c("Acousticness" = "red",
+                                 "Danceability" = "green",
+                                 "Energy" = "green",  # Change color for Energy attribute
+                                 "Instrumentalness" = "gray",
+                                 "Liveness" = "gray",
+                                 "Speechiness" = "gray")) +
+  theme_minimal() +
+  geom_vline(xintercept = 1950, linetype = "dashed", color = "black") +
+  annotate(geom = "text", x = 1950, y = max(yearly_avg$energy), label = "Start of Rock Music", vjust = -8, hjust = -0.1) +
+  annotate(geom = "segment", x = 1950, xend = 1950, y = max(yearly_avg$energy) * 1.02, yend = max(yearly_avg$energy), arrow = arrow(type = "closed", length = unit(0.2, "inches")))
+
+
+```
+
+```{r}
+# grouping the data by 'year' and calculating the mean of each audio feature
+yearly_avg1 <- music_data %>%
+  group_by(year) %>%
+  summarise(tempo = mean(tempo))
+
+# visualize the changes in these features over time using line plots
+ggplot(yearly_avg1, aes(x = year)) +
+  geom_line(aes(y = tempo, color = "Tempo"), size = 1) +
+  labs(title = "Tempo Attribute Preferences Over Time",
+       x = "Year",
+       y = "Value") +
+  scale_color_manual(values = c("Tempo" = "brown")) +
+  theme_minimal() +
+  
+  # Adding a vertical line at the year 1950
+  geom_vline(xintercept = 1950, linetype = "dashed", color = "black") +
+  
+  # Annotating the vertical line with the label
+  annotate(geom = "text", x = 1950, y = max(yearly_avg1$tempo), label = "Start of Rock Music", vjust = -0.1, hjust = -0.05) 
+```
+
+```{r}
+# grouping the data by 'year' and calculating the mean of each audio feature
+yearly_avg2 <- music_data %>%
+  group_by(year) %>%
+  summarise(loudness = mean(loudness))
+
+# visualize the changes in these features over time using line plots
+ggplot(yearly_avg2, aes(x = year)) +
+  geom_line(aes(y = loudness, color = "Loudness"), size = 1) +
+  labs(title = "Loudness Attribute Preferences Over Time",
+       x = "Year",
+       y = "Value") +
+  scale_color_manual(values = c("Loudness" = "brown")) +
+  theme_minimal() +
+  
+  # Adding a vertical line at the year 1950
+  geom_vline(xintercept = 1950, linetype = "dashed", color = "black") +
+  
+  # Annotating the vertical line with the label
+  annotate(geom = "text", x = 1950, y = max(yearly_avg2$loudness), label = "Start of Rock Music", vjust = -0.1, hjust = -0.05)
+
+```
+
+```{r}
+
+# Create a ggplot object
+p <- ggplot(music_data, aes(x = year, y = loudness, group = 1)) +
+  geom_line() +
+  transition_reveal(year) +
+  labs(title = 'Change in Loudness Over Years')  # Customize as needed
+
+# Render and view the animation
+animate(p)
+```
+
+```{r}
+# Create a ggplot object
+p1 <- ggplot(music_data, aes(x = year, y = tempo, group = 1)) +
+  geom_line() +
+  transition_reveal(year) +
+  labs(title = 'Change in tempo Over Years')  # Customize as needed
+
+# Render and view the animation
+animate(p1)
+```
+```{r}
+
+# Reshape the data to long format for ggplot
+yearly_avg_long <- yearly_avg %>%
+  pivot_longer(cols = -year, names_to = "Feature", values_to = "Value")
+
+# Create the plot
+p <- ggplot(yearly_avg_long, aes(x = year, y = Value, color = Feature, group = Feature)) +
+  geom_line(size = 1) +
+  labs(title = "Song Attribute Preferences Over Time",
+       x = "Year",
+       y = "Value",
+       color = "Feature") +
+  theme_minimal()
+
+# Animate the plot
+anim <- p + transition_reveal(year) +
+  enter_fade() +
+  exit_fade()
+
+animate(anim, nframes = 200, fps = 10)
+
+```
