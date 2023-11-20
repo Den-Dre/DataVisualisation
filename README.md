@@ -17,6 +17,8 @@ This nuanced approach can make the listening experience more compassionate and
 personalised, potentially increasing user satisfaction and engagement.
 
 ## Questions
+How do preferences of song attributes change over time? Do emotions have an impact on popularity of songs?
+
 1. How do preferences of song attributes differ between regions?
 2. Is there a correlation between attributes of popular songs and globally distressing
 events (eg: pandemic)?
