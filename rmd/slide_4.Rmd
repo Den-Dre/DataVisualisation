@@ -1,0 +1,237 @@
+---
+title: "Plotting Code"
+output: html_document
+date: "2023-11-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(vroom)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(janitor)
+library(lubridate)
+library(scales)
+library(tidyverse)
+library(ggthemes)
+library(gridExtra)
+library(purrr)
+```
+
+
+```{r}
+# Read in the data
+charts <- vroom::vroom('./data/charts.csv') %>% janitor::clean_names()
+top10 <- vroom::vroom('./data/top10s.csv') %>% janitor::clean_names()
+
+data <- charts %>%
+  inner_join(top10, by='title') %>%
+  janitor::clean_names()
+```
+```{r}
+glimpse(data)
+```
+```{r}
+summary(data)
+```
+
+```{r}
+data_ext <- data %>%
+  mutate(
+    date = ymd(date),
+    year = year(date),
+    genre = case_when(
+      top_genre %in% c('acoustic pop', 'art pop', 'australian pop', 'barbadian pop', 'baroque pop', 'boy band', 'canadian pop', 'candy pop', 'colombian pop', 'dance pop', 'danish pop', 'folk-pop', 'french indie pop', 'hip pop', 'indie pop', 'metropopolis', 'moroccan pop', 'pop') ~ 'Pop',
+      top_genre %in% c('alternative r&b', 'canadian contemporary r&b') ~ 'R&B',
+      top_genre %in% c('atl hip hop', 'art hip hop', 'australian hip hop', 'canadian hip hop', 'detroit hip hop','hip hop') ~ 'Hip hop', 
+      top_genre %in% c('australian dance', 'dance pop') ~ 'Dance',
+      top_genre %in% c('belgian edm', 'edm' ) ~ 'EDM',
+      top_genre %in% c('chicago rap') ~ 'Rap',
+      top_genre %in% c('big room', 'brostep', 'electro', 'electro house', 'electronic trap', 'electropop',' house', 'tropical house') ~ 'Electronic',
+      top_genre %in% c('british soul','complextro', 'contemporary country', 'downtempo', 'escape room', 'hollywood', 'irish singer-songwriter', 'latin', 'neo mellow', 'permanent wave') ~ 'Other'
+    )
+ )
+data_ext
+
+```
+
+```{r}
+data_ext_2 <- data_ext %>%
+  count(year, genre) %>%  # Count the number of songs by year and genre
+  group_by(year) %>%  # Group by year to calculate totals
+  mutate(total = sum(n)) %>%  # Calculate the total number of songs per year
+  ungroup() %>%  # Remove the grouping
+  mutate(percentage = (n / total) * 100) %>%  # Calculate the percentage
+  drop_na()
+
+# Check whether the percentages add up to 100 for each year
+data_ext_2 %>%
+  group_by(year) %>%
+  summarise(year_perc = sum(percentage))
+
+```
+
+
+## Layered Line chart
+
+```{r}
+data_ext_2 %>%
+  ggplot(aes(x=year, y=percentage, fill=fct_reorder(genre, n))) +
+  geom_area(position = 'stack') +
+  labs(title="Popularity of Genres over Time")
+  # scale_y_continuous(labels = function(x) paste0(x, '%'))
+```
+
+```{r}
+data_ext_2 %>%
+  ggplot(aes(x=year, y=percentage, fill=fct_relevel(genre, c('Rap','Dance','Hip hop','EDM','Electronic','Other','R&B','Pop')))) +
+  geom_bar(colour = 'darkgrey', stat = 'identity') +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  # geom_label( x=2017.5, y = 50, label= "Taylor Swift \n releases album 'Reputation'") +
+  # scale_fill_discrete(name="Genre") +
+  labs(title="Pop Songs Make Up The Majority of the Charts") +
+  xlab('Year') + 
+  ylab('Percentage Share') +
+  # geom_vline(xintercept = 2017.5, linewidth=1) +
+  geom_curve(
+    aes(x=2017, y=68, xend=2018, yend=78),
+    arrow = arrow(type='closed'),
+    color='black',
+    angle=90,
+    linewidth=.01
+  ) +
+  geom_curve(
+    aes(x=2020, y=77, xend=2021, yend=71),
+    arrow = arrow(type='closed'),
+    color='black',
+    angle=90,
+    linewidth=.01
+  ) +
+  annotate('label',  x=2017.5, y = 53, label= "Taylor Swift \n releases album 'Reputation'", fill='white') +
+  annotate('label',  x=2020.5, y = 57, label= "Adele releases \n album ‘Easy On Me’", fill='white') +
+  scale_fill_manual(values = c(
+    'Rap' = 'white',
+    'Dance' = 'white',
+    'Hip hop' = 'white',
+    'EDM' = 'white',
+    'Electronic' = 'white',
+    'Other' = 'white',
+    'R&B' = '#3cba54',
+    'Pop' = '#7AC5CD'
+),
+breaks = c('R&B', 'Pop', 'Other'),
+name='Genre') +
+  NULL
+```
+```{r}
+rnb_plot <- data_ext_2 %>%
+  filter(genre=='R&B') %>%
+  ggplot(aes(x=year, y=percentage), fill='#c4f3d2ff') +
+  geom_bar(fill = '#c4f3d2ff', color='black', stat = 'identity') +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  # geom_label( x=2017.5, y = 50, label= "Taylor Swift \n releases album 'Reputation'") +
+  # scale_fill_discrete(name="Genre") +
+  labs(title="Adele's Albums Strongly Influence R&B Charts") +
+  xlab('Year') + 
+  ylab('Percentage Share') +
+  # geom_vline(xintercept = 2017.5, linewidth=1) +
+  geom_curve(
+    aes(x=2020, y=.9, xend=2021, yend=4.3),
+    arrow = arrow(length = unit(0.5, "cm")),
+    color='black',
+    angle=90,
+    linewidth=.8
+  ) +
+  annotate('label',  x=2021-0.15, y = 5.5, label= "Adele releases \n album ‘Easy On Me’", fill='white') +
+  ylim(c(0, 10)) +
+  # theme_tufte() +
+
+  NULL
+rnb_plot
+```
+
+```{r}
+pop_plot <- data_ext_2 %>%
+  filter(genre=='Pop') %>%
+  ggplot(aes(x=year, y=percentage), fill='#c4f3d2ff') +
+  geom_bar(fill = '#c4f3d2ff', color='black', stat = 'identity') +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  # geom_label( x=2017.5, y = 50, label= "Taylor Swift \n releases album 'Reputation'") +
+  # scale_fill_discrete(name="Genre") +
+  labs(title="Taylor Swift's Album Strongly Influence Pop Charts") +
+  xlab('Year') + 
+  ylab('Percentage Share') +
+  # geom_vline(xintercept = 2017.5, linewidth=1) +
+  geom_curve(
+    aes(x=2017, y=67, xend=2018, yend=78),
+    arrow = arrow(length = unit(0.5, "cm")),
+    color='black',
+    angle=90,
+    linewidth=.8
+  ) +
+  annotate('label',  x=2017.5, y = 55, label= "Taylor Swift releases \n album ‘Reputation’", fill='white') +
+  ylim(c(0, 80)) +
+  NULL
+pop_plot
+```
+
+
+```{r}
+#Combine the plots
+grid.arrange(pop_plot, rnb_plot, ncol=2)
+
+```
+```{r}
+# Save plots
+ggsave("rnb_plot.png", rnb_plot, bg = "transparent", width = 1920, height = 1080, units = "px")
+ggsave("pop_plot.png", pop_plot, bg = "transparent", width = 1920, height = 1080, units = "px")
+```
+
+# Make a predictive model to predict number of streams
+
+```{r}
+# Sample the data
+numeric_cols <- colnames(data_ext[, sapply(data_ext,is.numeric)])
+data_cp <- as.data.frame(data_ext)
+data_cp[, numeric_cols] <- as.data.frame(scale(data_cp %>% select(all_of(numeric_cols))))
+
+data_cp_2 <- data_cp %>% select(-c('chart'))
+
+# Splitting the data into training and testing sets
+set.seed(123) # For reproducibility
+train_indices <- sample(1:nrow(data_cp_2), 0.8 * nrow(data_cp_2))
+train_data <- data_cp_2[train_indices, ]
+test_data <- data_cp_2[-train_indices, ]
+
+# Fitting a linear regression model
+model <- lm(streams ~ ., data = train_data[1:10000,])
+
+# Making predictions
+predictions <- predict(model, test_data)
+
+# You can now evaluate the model using metrics like RMSE, MAE, etc.
+# For example, using RMSE (Root Mean Square Error)
+rmse <- sqrt(mean((predictions - test_data$streams)^2))
+print(paste("RMSE:", rmse))
+
+# You can also plot predictions vs actual values to visually inspect the model performance
+plot(test_data$popularity, predictions, xlab = "Actual Popularity", ylab = "Predicted Popularity", main = "Predicted vs Actual Popularity")
+abline(0, 1)
+```
+
