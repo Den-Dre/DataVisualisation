@@ -1,0 +1,181 @@
+---
+title: "Data Visualisation"
+author: "Yiran Shu"
+date: November 2023
+output:
+  html_document:
+    theme: journal
+    highlight: tango
+    number_sections: yes
+    toc: yes
+    toc_float: no
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, load_libraries, include = FALSE}
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+```
+
+
+## Load the data
+```{r, load_data, warning=FALSE, message=FALSE}
+# Read the CSV file
+df <- read_csv("charts.csv", col_types = cols(date = col_date(), artist = col_character(), 
+                                              region = col_character(), chart = col_character(), 
+                                              streams = col_double()))
+dfs_top200 <- df %>%
+  filter(chart == "top200") %>%
+  select(-chart)
+head(dfs_top200, 3)
+
+dfs_top200 <- dfs_top200 %>%
+  mutate(yr = year(date))
+head(dfs_top200, 3)
+
+top_artists <- dfs_top200 %>%
+  count(artist, sort = TRUE) %>%
+  top_n(10)
+
+# Apply your processing for each artist here
+# For example, you can loop through top_artists and do some analysis
+
+```
+
+## Top4 by region
+```{r}
+artist_streams <- function(a1, dfs_top200) {
+# Filter for the specified artist, case-insensitive
+df_artist <- dfs_top200 %>%
+  filter(artist == a1)
+
+  # Aggregate streams by year and region
+  df_agg <- df_artist %>%
+    group_by(yr, region) %>%
+    summarize(streams = sum(streams), .groups = 'drop')
+
+  # Get the top 4 regions by total streams
+  top_regions <- df_agg %>%
+    group_by(region) %>%
+    summarize(total_streams = sum(streams), .groups = 'drop') %>%
+    arrange(desc(total_streams)) %>%
+    slice_head(n = 4) %>%
+    pull(region)
+
+  # Filter the aggregated data for top regions
+  df_top <- df_agg %>%
+    filter(region %in% top_regions)
+
+  # Create a factor with levels ordered by total streams for plotting
+  df_top$region <- factor(df_top$region, levels = top_regions)
+
+  # Plot
+  gg <- ggplot(df_top, aes(x = yr, y = streams, fill = region)) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = custom_colors) +
+    theme_minimal() +
+    labs(x = "Year", y = "Streams", title = paste(a1, "Top 4 by Region")) +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12),
+      axis.text.y = element_text(size = 12),
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      plot.title = element_text(size = 16),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 12),
+      legend.position = "right"
+    ) +
+    coord_flip()  # Flip the coordinates to make the bars horizontal
+print(gg)
+  # Save the plot with specified dimensions
+  ggsave(paste0(a1, "_Top_4_by_Region.png"), gg, bg = "transparent", width = 1920, height = 1080, units = "px")
+}
+
+# Make sure custom_colors is defined with your desired colors
+custom_colors <- c("#c4f3d2ff", "#f4c20d", "#3cba54", "#7AC5CD")
+
+# Artists to plot
+artists <- c("Ed Sheeran", "Billie Eilish", "Post Malone", "The Weeknd", "Imagine Dragons")
+
+# Call the function for each artist
+for (artist in artists) {
+  artist_streams(artist, dfs_top200)
+
+}
+
+
+
+```
+
+```{r}
+region_streams <- function(r1, dfs_top200) {
+  # Aggregate streams by year and artist for the specified region
+  df_region <- dfs_top200 %>%
+    filter(region == r1) %>%
+    group_by(yr, artist) %>%
+    summarize(streams = sum(streams), .groups = 'drop')
+
+  # Identify top 4 artists by total streams
+  top_artists <- df_region %>%
+    group_by(artist) %>%
+    summarize(total_streams = sum(streams), .groups = 'drop') %>%
+    arrange(desc(total_streams)) %>%
+    slice_head(n = 4) %>%
+    pull(artist)
+
+  # Filter the aggregated data for top artists
+  df_top1 <- df_region %>%
+    filter(artist %in% top_artists) %>%
+    mutate(artist = factor(artist, levels = top_artists))
+
+  # Create a pivot table for plotting
+  pivot_table <- df_top1 %>%
+    pivot_wider(names_from = artist, values_from = streams, values_fill = list(streams = 0))
+
+  # Convert to long format for ggplot
+  long_format <- pivot_table %>%
+    gather(key = "artist", value = "streams", -yr) %>%
+    arrange(yr)
+
+  # Plot
+  gg1 <- ggplot(long_format, aes(x = yr, y = streams, fill = artist)) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = custom_colors) +
+    theme_minimal() +
+    labs(x = "Year", y = "Streams", fill = "Artist", title = paste(r1, "Top 4 by Artist")) +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 12),
+      axis.text.y = element_text(size = 12),
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      plot.title = element_text(size = 16),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 12),
+      legend.position = "right"
+    ) +
+    coord_flip()
+print(gg1)
+   # Save the plot with specified dimensions
+  ggsave(paste0(r1, "_Top_4_by_Artist.png"), gg1, bg = "transparent", width = 1920, height = 1080, units = "px")
+}
+
+# Make sure custom_colors is defined with your desired colors
+custom_colors <- c("#c4f3d2ff", "#f4c20d", "#3cba54", "#7AC5CD")
+
+# Regions to plot
+regions <- c("Japan", "United Kingdom", "United States", "Germany", "Australia")
+
+# Call the function for each artist
+for (region in regions) {
+  region_streams(region, dfs_top200)
+}
+
+```
+9j
