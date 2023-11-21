@@ -1,0 +1,677 @@
+---
+title: "Group Project - Spotify Data"
+author: "Pongpol Anuntasilpa"
+date: "2023-11-21"
+output:
+  html_document:
+    theme: flatly
+    highlight: zenburn
+    number_sections: FALSE
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(vroom)
+library(skimr)
+library(sf)
+library(ggplot2)
+library(leaflet)
+library(osrm)
+library(stplanr)
+library(htmltools)
+library(mapview)
+library(viridis)
+library(mapboxapi)
+library(forcats)
+library(RColorBrewer)
+library(nnet)
+library(caret)
+library(pROC)
+```
+
+# Data Import
+
+```{r data-import, warning=FALSE, message=FALSE}
+
+# Directory containing the data
+data_dir <- "data/spotify_data.csv"
+
+# Read all CSV files using vroom
+spotify_data <- vroom(data_dir)
+
+```
+
+```{r}
+
+# skim(spotify_data)
+# glimpse(spotify_data)
+# head(spotify_data)
+# tail(spotify_data)
+
+```
+
+
+# Data Cleaning and Transformation
+
+```{r data-cleaning}
+
+# Selecting relevant columns
+spotify_data <- spotify_data %>%
+  select(title, rank, date, artist, region, chart, streams)
+
+# Converting 'rank' column to integer
+spotify_data$rank <- as.integer(spotify_data$rank)
+
+```
+
+```{r missing-data-3}
+
+# Calculating the number of missing values in each column
+missing_data_counts <- spotify_data %>%
+  summarise_all(~sum(is.na(.)))
+
+# Calculating the percentage of missing values in each column
+missing_data_percentage <- spotify_data %>%
+  summarise_all(~mean(is.na(.)) * 100)
+
+missing_data_counts
+missing_data_percentage
+
+```
+```{r missing-data-2}
+
+# Select rows where 'streams' is NA and calculate unique counts
+unique_counts <- spotify_data %>%
+  filter(is.na(streams)) %>%
+  summarise_all(~n_distinct(.))
+
+unique_counts
+
+unique_charts <- unique(spotify_data$chart[is.na(spotify_data$streams)])
+
+unique_charts
+
+```
+```{r data-cleaning-2}
+
+# Filter out rows where 'chart' is 'viral50', drop the 'chart' column, and remove rows with NAs
+spotify_data <- spotify_data %>%
+  filter(chart != "viral50") %>%
+  select(-chart) %>%
+  drop_na()
+
+```
+
+```{r checking-result}
+
+colSums(is.na(spotify_data))
+
+```
+```{r}
+
+# Expected amount of data for 5 years of daily chart results with 200 ranks
+full_data <- 365 * 5 * 200
+full_data
+
+```
+```{r}
+
+# Calculate region data volume as a percentage of full_data
+region_data_volume <- spotify_data %>%
+  count(region) %>%
+  mutate(percentage = n / full_data * 100)
+
+# Rounding off the percentage to 1 decimal place
+region_data_volume$percentage <- round(region_data_volume$percentage, 1)
+
+region_data_volume
+
+# Identify regions with data completeness above 50%
+complete_regions <- region_data_volume %>%
+  filter(percentage >= 50) %>%
+  .$region
+
+complete_regions
+
+```
+
+```{r data-cleaning-3}
+
+# Filter dataframe to include only data from complete regions
+spotify_data <- spotify_data %>%
+  filter(region %in% complete_regions)
+
+```
+
+# Initial Data Exploration
+
+```{r data-exploration}
+skim(spotify_data)
+```
+
+```{r}
+
+highest_streams <- spotify_data %>% 
+  arrange(desc(streams)) %>% 
+  select(title, rank, date, artist, streams) %>%
+  distinct(title, .keep_all = TRUE)
+
+highest_streams
+
+```
+
+# Analysis
+
+```{r data-analysis}
+
+# Copying the dataframe
+spotify_analysis <- spotify_data
+
+# Exclude 'Global' region
+spotify_analysis <- spotify_analysis %>% filter(region != "Global")
+
+# Extracting year and month
+spotify_analysis$year <- year(spotify_analysis$date)
+spotify_analysis$month <- month(spotify_analysis$date)
+
+# Identifying top 10 songs
+spotify_analysis$top10 <- spotify_analysis$rank <= 10
+
+spotify_analysis
+
+```
+
+# Visualisation 1 - Global Streams on Spotify Trend
+
+```{r, visualisation, warning=FALSE, message=FALSE}
+
+# Grouping by year and summing streams
+streams_trend <- spotify_analysis %>%
+  group_by(year) %>%
+  summarise(total_streams = sum(streams, na.rm = TRUE)) %>%
+  mutate(streams_in_million = round(total_streams / 1e6, 2))
+
+# Calculate year-over-year growth rate
+streams_trend <- streams_trend %>%
+  mutate(growth_rate = ((total_streams / lag(total_streams) - 1) * 100))
+
+# Replace NA in growth_rate with 0 (for the first year)
+streams_trend$growth_rate[is.na(streams_trend$growth_rate)] <- 0
+
+# Round off the growth rate to 1 decimal place
+streams_trend$growth_rate <- round(streams_trend$growth_rate, 1)
+
+# Primary plot with bars
+p1 <- ggplot(streams_trend, aes(x = as.factor(year))) +
+  geom_bar(aes(y = streams_in_million), stat = "identity", fill = "grey") +
+  labs(title = "Global Streams on Spotify with Growth Rate",
+       x = "Years",
+       y = "Total Streams (in million)") +
+  theme_minimal()
+
+# Adding secondary axis for growth rate
+p1 + geom_point(aes(y = growth_rate/100 * max(streams_trend$streams_in_million)), color = "black") +
+  geom_line(aes(y = growth_rate/100 * max(streams_trend$streams_in_million)), color = "black", group = 1) +
+  geom_text(aes(y = growth_rate/100 * max(streams_trend$streams_in_million), label = paste(growth_rate, "%")), 
+            vjust = -0.5, color = "black") +  # Adjust vjust for vertical spacing
+  scale_y_continuous(
+    sec.axis = sec_axis(~ . / max(streams_trend$streams_in_million) * 100, name = "Growth Rate (%)")
+  )
+
+```
+
+# Visualisation 2
+
+```{r visualisation-2}
+
+# Pivot table of streams by region and year
+streams_market_share <- spotify_analysis %>%
+  group_by(region, year) %>%
+  summarise(total_streams = sum(streams, na.rm = TRUE)) %>%
+  pivot_wider(names_from = year, values_from = total_streams) %>%
+  arrange(desc(`2017`)) %>% 
+  ungroup()
+
+# Calculate market shares
+market_shares <- streams_market_share %>%
+  mutate_at(vars(-region), ~round(.x / sum(.x, na.rm = TRUE) * 100, 1))
+
+# Select top 30 regions
+top_market_shares <- head(market_shares, 30)
+
+# Select top 10 regions for plotting
+top_10_market_shares <- head(market_shares, 10)
+
+# Reshape for plotting
+top_10_market_shares_long <- top_10_market_shares %>%
+  pivot_longer(cols = -region, names_to = "year", values_to = "share")
+
+# Plot
+ggplot(top_10_market_shares_long, aes(x = region, y = share, fill = year)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(title = "Market Share Development Top 10 Regions",
+       x = "Region",
+       y = "% Market Share") +
+  theme_minimal() +
+  coord_flip() +
+  guides(fill = guide_legend(reverse = TRUE))
+
+```
+
+# Visualisation 3
+
+```{r}
+
+# Calculate year-over-year growth rate
+market_shares_yoy <- market_shares %>%
+  pivot_longer(cols = -region, names_to = "year", values_to = "share")
+
+market_shares_yoy <- market_shares_yoy %>% 
+  group_by(region) %>%
+  mutate(growth_rate = ((share / lag(share) - 1) * 100)) %>% 
+  ungroup()
+
+# Replace NA in growth_rate with 0 (for the first year)
+market_shares_yoy$growth_rate[is.na(market_shares_yoy$growth_rate)] <- 0
+
+# Round off the growth rate to 1 decimal place
+market_shares_yoy$growth_rate <- round(market_shares_yoy$growth_rate, 1)
+
+market_shares_yoy <- market_shares_yoy %>% 
+  pivot_wider(names_from = year, values_from = c(share, growth_rate), names_sep = "")
+
+market_shares_yoy <- market_shares_yoy %>% 
+  select(region, growth_rate2017, growth_rate2018, growth_rate2019, growth_rate2020, growth_rate2021)
+
+market_shares_yoy$'2017' <- market_shares_yoy$growth_rate2017
+market_shares_yoy$'2018' <- market_shares_yoy$growth_rate2018
+market_shares_yoy$'2019' <- market_shares_yoy$growth_rate2019
+market_shares_yoy$'2020' <- market_shares_yoy$growth_rate2020
+market_shares_yoy$'2021' <- market_shares_yoy$growth_rate2021
+
+market_shares_yoy <- market_shares_yoy %>% 
+  select('region', '2017','2018', '2019', '2020', '2021')
+
+market_shares_yoy
+
+```
+
+```{r}
+
+# Extract top regions
+top_regions <- head(market_shares, 10) %>%
+  pull(region)
+
+# Filter growth rates for top regions
+top_growth_rate_song <- filter(market_shares_yoy, region %in% top_regions)
+
+# Transform data for heatmap plotting
+top_growth_rate_song_long <- pivot_longer(top_growth_rate_song, cols = -region, names_to = "year", values_to = "growth_rate")
+
+# Create a heatmap
+ggplot(top_growth_rate_song_long, aes(x = year, y = region, fill = growth_rate)) +
+  geom_tile(color = "white", size = 2) +
+  scale_fill_distiller(palette = "Spectral", direction = 1) +
+  labs(title = "% YoY Growth Rates by Region",
+       x = "Year",
+       y = "Region") +
+  theme_minimal() +
+  geom_text(aes(label = sprintf("%.1f%%", growth_rate)), size = 3, color = "black")
+
+```
+
+# Visualisation 4
+
+```{r}
+
+# Split 'artist' column and unnest
+spotify_artist <- spotify_data %>%
+  mutate(artist = strsplit(as.character(artist), ",")) %>%
+  tidyr::unnest(artist)
+
+# Strip whitespace
+spotify_artist$artist <- trimws(spotify_artist$artist)
+
+spotify_artist
+
+```
+
+
+# Visualisation 5
+
+```{r}
+
+# Grouping by region and artist to calculate total streams
+artists_region_performance <- spotify_artist %>%
+  filter(region != "Global") %>% 
+  group_by(region, artist) %>%
+  summarise(streams = sum(streams, na.rm = TRUE)) %>%
+  mutate(streams_million = round(streams / 1e6, 1)) %>%
+  ungroup()
+
+# Calculating artist rank within each region
+artists_region_performance <- artists_region_performance %>%
+  group_by(region) %>%
+  mutate(artist_rank = dense_rank(desc(streams_million))) %>%
+  ungroup()
+
+# Subset for the top artist and calculate stream shares
+top_artist <- "Ed Sheeran"
+top_artist_region_performance <- artists_region_performance %>%
+  filter(artist == top_artist) %>%
+  arrange(desc(streams_million)) %>%
+  mutate(stream_share = round(100 * streams_million / sum(streams_million), 1),
+         stream_share_running = cumsum(stream_share))
+
+top_artist_region_performance
+
+```
+
+```{r}
+
+artist_name <- top_artist
+
+# Find the top song for the specified artist
+top_song_for_artist_test <- spotify_analysis %>%
+  filter(region != "Global") %>% 
+  filter(artist == artist_name) %>%
+  group_by(title) %>%
+  summarise(total_streams = sum(streams, na.rm = TRUE)) %>%
+  arrange(desc(total_streams)) %>%
+  top_n(20, total_streams)
+
+top_song_for_artist_test
+
+```
+
+
+# Visualisation 6
+
+```{r}
+
+best_song <- "Shape of You"
+
+# Calculate average rank by region for the best song
+best_song_region <- spotify_artist %>%
+  filter(region != "Global") %>% 
+  filter(title == best_song) %>%
+  group_by(region) %>%
+  summarise(avg_rank = mean(rank, na.rm = TRUE)) %>%
+  arrange(avg_rank)
+
+# Bar plot of average rank by region
+ggplot(best_song_region, aes(x = reorder(region, avg_rank), y = avg_rank)) +
+  geom_bar(stat = "identity") +
+  labs(title = paste("Avg rank of", best_song, "by region"),
+       x = "Region",
+       y = "Average Rank") +
+  theme_minimal() +
+  coord_flip()
+
+```
+
+```{r}
+
+# Get the best performing country
+best_song_country <- best_song_region$region[1]
+best_rank <- round(best_song_region$avg_rank[1], 1)
+best_performance_statement <- paste(best_song, "is performing best in", best_song_country, "with an avg rank of", best_rank)
+best_performance_statement
+
+```
+```{r}
+
+# Filter data for the line plot
+countries <- c(best_song_country, "United States")
+rank_development_data <- spotify_artist %>%
+  filter(region != "Global") %>% 
+  filter(title == best_song, region %in% countries)
+
+# Line plot
+ggplot(rank_development_data, aes(x = date, y = rank, color = region)) +
+  geom_line() +
+  scale_y_reverse() +
+  labs(title = paste("Rank development of", best_song),
+       x = "Date",
+       y = "Rank") +
+  theme_minimal()
+
+```
+
+# Visualisation 7
+
+```{r}
+
+# Filter for Taylor Swift's songs
+taylor_swift_songs <- spotify_artist %>%
+  filter(region != "Global") %>%
+  filter(artist == "Taylor Swift") %>%
+  group_by(date) %>%
+  summarise(avg_rank = mean(rank, na.rm = TRUE))
+
+reputation_stadium_tour <- as.Date(c("2018-05-08", "2018-11-21"))
+
+# Line plot of average rank over time
+p7 <- ggplot(taylor_swift_songs, aes(x = date, y = avg_rank)) +
+  geom_line(color = "#3cba54") +
+  geom_vline(xintercept = reputation_stadium_tour, linetype = "dashed", color = "red") +
+  labs(title = "Average Rank Development of Taylor Swift's Songs Over Time",
+       x = "Date",
+       y = "Average Rank") +
+  theme_minimal() +
+  scale_y_reverse()
+
+# Define summer and winter start dates for 2017-2021
+summer_starts <- as.Date(c("2017-06-21", "2018-06-21", "2019-06-21", "2020-06-20", "2021-06-20"))  # Adjusted for leap year
+winter_starts <- as.Date(c("2017-12-21", "2018-12-21", "2019-12-22", "2020-12-21", "2021-12-21"))  # Adjusted for leap year
+
+# Line plot with summer and winter start dates
+p8 <- ggplot(taylor_swift_songs, aes(x = date, y = avg_rank)) +
+  geom_line(color = "#3cba54") +
+  geom_vline(xintercept = reputation_stadium_tour, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = as.numeric(summer_starts), linetype = "dotted", color = "#db3236", size = 0.5) +
+  geom_vline(xintercept = as.numeric(winter_starts), linetype = "dotted", color = "#7AC5CD", size = 0.5) +
+  labs(title = "Average Rank Development of Taylor Swift's Songs Over Time",
+       x = "Date",
+       y = "Average Rank") +
+  theme_minimal() +
+  scale_y_reverse()
+
+p8
+
+```
+
+# Joining data togther
+
+```{r}
+
+# Read in the data
+top10 <- vroom::vroom('./data/top10s.csv')
+
+spotify_data_joined <- spotify_data %>%
+  inner_join(top10, by='title') %>%
+  janitor::clean_names()
+
+spotify_data_joined
+
+```
+
+```{r}
+
+library(dplyr)
+library(vroom)
+library(nnet)
+library(janitor)
+
+# Read in and prepare the data
+top10 <- vroom::vroom('./data/top10s.csv')
+spotify_data_joined <- spotify_data %>%
+  inner_join(top10, by='title') %>%
+  janitor::clean_names()
+
+# Selecting a subset of features
+selected_features <- c('bpm', 'nrgy', 'dnce', 'acous', 'val')
+
+# Convert 'top_genre' to a binary variable: 1 for 'dance pop', 0 for others
+spotify_data_joined$binary_genre <- ifelse(spotify_data_joined$top_genre == 'dance pop', 1, 0)
+
+# Preprocessing: Scaling the selected features
+data_features <- spotify_data_joined[c(selected_features, 'binary_genre')]
+data_features_scaled <- data_features %>% 
+  mutate(across(all_of(selected_features), scale))
+
+# Split the data into training and testing sets
+set.seed(123)
+train_indices <- sample(1:nrow(data_features_scaled), 0.8 * nrow(data_features_scaled))
+train_data <- data_features_scaled[train_indices, ]
+test_data <- data_features_scaled[-train_indices, ]
+
+# Fitting a Binary Logistic Regression Model
+model <- glm(binary_genre ~ ., data = train_data, family = binomial())
+
+# Making predictions (probability of being 'dance pop')
+predictions <- predict(model, test_data, type = "response")
+
+# Converting probabilities to binary class predictions
+predicted_classes <- ifelse(predictions > 0.5, 1, 0)
+
+# Confusion Matrix to calculate Accuracy, Precision, and Recall
+conf_matrix <- confusionMatrix(as.factor(predicted_classes), as.factor(test_data$binary_genre))
+
+# Accuracy
+accuracy <- conf_matrix$overall['Accuracy']
+print(paste("Accuracy:", accuracy))
+
+# Precision and Recall
+precision <- conf_matrix$byClass['Precision']
+recall <- conf_matrix$byClass['Recall']
+print(paste("Precision:", precision))
+print(paste("Recall:", recall))
+
+# F1 Score
+f1_score <- 2 * (precision * recall) / (precision + recall)
+print(paste("F1 Score:", f1_score))
+
+# AUC-ROC
+roc_result <- roc(test_data$binary_genre, predictions)
+auc_value <- auc(roc_result)
+print(paste("AUC-ROC:", auc_value))
+
+
+
+```
+
+```{r}
+
+# Calculate total streams per region and select top 10
+top_regions <- spotify_data_joined %>%
+  group_by(region) %>%
+  summarise(total_streams = sum(streams)) %>%
+  arrange(desc(total_streams)) %>%
+  top_n(11, total_streams)
+
+# Join with the main data to filter only top regions
+filtered_data <- spotify_data_joined %>%
+  semi_join(top_regions, by = "region")
+
+filtered_data <- filtered_data %>% 
+  filter(region != "Global")
+
+# Aggregate data for these top regions
+region_data <- filtered_data %>%
+  group_by(region) %>%
+  summarise(avg_streams = mean(streams),
+            top_genre = top_genre[which.max(table(top_genre))])
+
+# Plotting Streaming Numbers by Top Regions
+ggplot(region_data, aes(x = reorder(region, avg_streams), y = avg_streams)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Average Streaming Numbers by Top Regions",
+       x = "Region",
+       y = "Average Streams") +
+  coord_flip()  # Flip the coordinates for horizontal bars
+
+```
+
+```{r}
+
+# Identify the top 10 genres based on frequency
+top_genres <- filtered_data %>%
+  count(top_genre) %>%
+  arrange(desc(n)) %>%
+  top_n(5, n) %>%
+  pull(top_genre)
+
+# Count the frequency of each of these top genres in each region
+genre_counts <- filtered_data %>%
+  filter(top_genre %in% top_genres) %>%
+  count(region, top_genre) %>%
+  arrange(region, desc(n))
+
+# Create the heatmap with top 10 genres
+p_new <- ggplot(genre_counts, aes(x = region, y = reorder(top_genre, n), fill = n)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "#c4f3d2ff") +
+  theme_minimal() +
+  labs(title = "Popularity of Top 5 Genres Across Top Regions",
+       x = "Region",
+       y = "Genre",
+       fill = "Frequency") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+```
+
+```{r}
+
+# Filter data for Taylor Swift
+taylor_swift_data_stat <- spotify_data_joined %>%
+  filter(artist_x == "Taylor Swift" | artist_y == "Taylor Swift")
+
+# Calculate the average scores
+taylor_averages <- taylor_swift_data_stat %>%
+  summarise(
+    avg_bpm = mean(bpm, na.rm = TRUE),
+    avg_nrgy = mean(nrgy, na.rm = TRUE),
+    avg_dnce = mean(dnce, na.rm = TRUE),
+    avg_acous = mean(acous, na.rm = TRUE),
+    avg_val = mean(val, na.rm = TRUE)
+  )
+
+# View the results
+print(taylor_averages)
+
+```
+
+```{r}
+
+# Calculate the maximum values for each feature across all artists
+max_values <- spotify_data_joined %>%
+  summarise(
+    max_bpm = max(bpm, na.rm = TRUE),
+    max_nrgy = max(nrgy, na.rm = TRUE),
+    max_dnce = max(dnce, na.rm = TRUE),
+    max_acous = max(acous, na.rm = TRUE),
+    max_val = max(val, na.rm = TRUE)
+  )
+
+# Print max values and Taylor Swift's averages
+print(max_values)
+print(taylor_averages)
+
+```
+
+```{r}
+
+skim(spotify_data_joined)
+
+```
+
